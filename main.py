@@ -5,8 +5,15 @@ import numpy as np
 import librosa
 import io
 import base64
-
 app = FastAPI()
+@app.get("/")
+def home():
+    return {
+        "status": "running",
+        "message": "AI Voice Detector API is live"
+    }
+
+
 
 # 🔐 Your Secret API Key
 API_KEY = "test12345"
