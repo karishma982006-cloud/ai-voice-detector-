@@ -1,5 +1,4 @@
-import os
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 import joblib
 import numpy as np
@@ -7,53 +6,57 @@ import librosa
 import io
 import base64
 
-app = FastAPI()
+app = FastAPI(title="AI Voice Detector")
 
-# Load model
+# Load trained model
 model = joblib.load("model.pkl")
 
 
+# ===== Request Body =====
 class AudioRequest(BaseModel):
+    language: str
+    audio_format: str
     audio_base64: str
 
 
-def extract_features(file_bytes):
-    y, sr = librosa.load(io.BytesIO(file_bytes), sr=None)
-
-    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
-    mfccs_mean = np.mean(mfccs, axis=1)
-
-    zcr = np.mean(librosa.feature.zero_crossing_rate(y))
-    spectral_centroid = np.mean(librosa.feature.spectral_centroid(y=y, sr=sr))
-    spectral_flatness = np.mean(librosa.feature.spectral_flatness(y=y))
-
-    features = np.hstack([
-        mfccs_mean,
-        zcr,
-        spectral_centroid,
-        spectral_flatness
-    ])
-
-    return features.reshape(1, -1)
-
-
+# ===== Health Check =====
 @app.get("/")
 def home():
-    return {
-        "status": "running",
-        "message": "AI Voice Detector API is live"
-    }
+    return {"status": "running", "message": "AI Voice Detector API is live"}
 
 
-@app.post("/predict")
-def predict(data: AudioRequest):
+# ===== Predict Endpoint =====
+@app.post("/detect")
+def detect_voice(
+    request: AudioRequest,
+    x_api_key: str = Header(...)
+):
+    # Validate API key
+    if x_api_key != "test12345":
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+
     try:
-        audio_bytes = base64.b64decode(data.audio_base64)
-        features = extract_features(audio_bytes)
-        prediction = model.predict(features)
+        # Decode base64 to bytes
+        audio_bytes = base64.b64decode(request.audio_base64)
 
+        # Extract features
+        y, sr = librosa.load(io.BytesIO(audio_bytes), sr=None)
+        mfcc = np.mean(librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13), axis=1)
+        zcr = np.mean(librosa.feature.zero_crossing_rate(y=y))
+        spectral_flatness = np.mean(librosa.feature.spectral_flatness(y=y))
+
+        features = np.hstack([mfcc, zcr, spectral_flatness]).reshape(1, -1)
+
+        # Predict using model
+        prediction = model.predict(features)[0]
+        confidence = float(np.max(model.predict_proba(features)))
+
+        # Return final result
         return {
-            "prediction": "AI" if prediction[0] == 1 else "Human"
+            "language": request.language,
+            "audio_format": request.audio_format,
+            "prediction": "AI Generated" if prediction == 1 else "Human",
+            "confidence": round(confidence, 3)
         }
 
     except Exception as e:
