@@ -8,50 +8,77 @@ import base64
 
 app = FastAPI(title="AI Voice Detector")
 
-# Load trained model
+# Load the trained model
 model = joblib.load("model.pkl")
 
 
-# ===== Request Body =====
+# ===== REQUEST BODY =====
 class AudioRequest(BaseModel):
     language: str
     audio_format: str
     audio_base64: str
 
 
-# ===== Health Check =====
+# ===== FEATURE EXTRACTION =====
+def extract_features(audio_bytes):
+    # Convert bytes into audio array
+    y, sr = librosa.load(io.BytesIO(audio_bytes), sr=None)
+
+    # 13 MFCCs
+    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+    mfccs_mean = np.mean(mfccs, axis=1)
+
+    # Zero Crossing Rate
+    zcr = np.mean(librosa.feature.zero_crossing_rate(y=y))
+
+    # Spectral Flatness
+    spectral_flatness = np.mean(librosa.feature.spectral_flatness(y=y))
+
+    # Pitch (IMPORTANT)
+    pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
+    pitch = np.mean(pitches)
+
+    # Combine into 16 features
+    features = np.hstack([
+        mfccs_mean,
+        zcr,
+        spectral_flatness,
+        pitch
+    ])
+
+    # Return shape (1, 16)
+    return features.reshape(1, -1)
+
+
+# ===== HEALTH CHECK =====
 @app.get("/")
 def home():
     return {"status": "running", "message": "AI Voice Detector API is live"}
 
 
-# ===== Predict Endpoint =====
+# ===== PREDICTION ENDPOINT =====
 @app.post("/detect")
 def detect_voice(
     request: AudioRequest,
     x_api_key: str = Header(...)
 ):
+
     # Validate API key
     if x_api_key != "test12345":
         raise HTTPException(status_code=401, detail="Invalid API Key")
 
     try:
-        # Decode base64 to bytes
+        # Decode Base64 audio
         audio_bytes = base64.b64decode(request.audio_base64)
 
         # Extract features
-        y, sr = librosa.load(io.BytesIO(audio_bytes), sr=None)
-        mfcc = np.mean(librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13), axis=1)
-        zcr = np.mean(librosa.feature.zero_crossing_rate(y=y))
-        spectral_flatness = np.mean(librosa.feature.spectral_flatness(y=y))
-
-        features = np.hstack([mfcc, zcr, spectral_flatness]).reshape(1, -1)
+        features = extract_features(audio_bytes)
 
         # Predict using model
         prediction = model.predict(features)[0]
         confidence = float(np.max(model.predict_proba(features)))
 
-        # Return final result
+        # Return JSON response
         return {
             "language": request.language,
             "audio_format": request.audio_format,
