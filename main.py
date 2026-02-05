@@ -5,6 +5,7 @@ import numpy as np
 import librosa
 import io
 import base64
+from typing import Optional
 
 app = FastAPI(title="AI Voice Detector")
 
@@ -34,7 +35,7 @@ def extract_features(audio_bytes):
     # Spectral Flatness
     spectral_flatness = np.mean(librosa.feature.spectral_flatness(y=y))
 
-    # Pitch (IMPORTANT)
+    # Pitch
     pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
     pitch = np.mean(pitches)
 
@@ -46,23 +47,33 @@ def extract_features(audio_bytes):
         pitch
     ])
 
-    # Return shape (1, 16)
     return features.reshape(1, -1)
 
 
-# ===== HEALTH CHECK =====
+# ===== ROOT HEALTH CHECK =====
 @app.get("/")
 def home():
-    return {"status": "running", "message": "AI Voice Detector API is live"}
+    return {
+        "status": "running",
+        "message": "AI Voice Detector API is live"
+    }
 
 
-# ===== PREDICTION ENDPOINT =====
+# ===== GUVI HEALTH CHECK (NO API KEY) =====
+@app.get("/detect")
+def detect_health():
+    return {
+        "status": "ready",
+        "message": "Detection endpoint is available"
+    }
+
+
+# ===== PREDICTION ENDPOINT (API KEY REQUIRED) =====
 @app.post("/detect")
 def detect_voice(
     request: AudioRequest,
     x_api_key: str = Header(...)
 ):
-
     # Validate API key
     if x_api_key != "test12345":
         raise HTTPException(status_code=401, detail="Invalid API Key")
@@ -74,11 +85,10 @@ def detect_voice(
         # Extract features
         features = extract_features(audio_bytes)
 
-        # Predict using model
+        # Predict
         prediction = model.predict(features)[0]
         confidence = float(np.max(model.predict_proba(features)))
 
-        # Return JSON response
         return {
             "language": request.language,
             "audio_format": request.audio_format,
