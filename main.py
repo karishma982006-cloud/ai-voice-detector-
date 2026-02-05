@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Header, HTTPException
+import os
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import joblib
 import numpy as np
@@ -8,24 +9,14 @@ import base64
 
 app = FastAPI()
 
-# Load trained model
+# Load model
 model = joblib.load("model.pkl")
 
-# Root endpoint
-@app.get("/")
-def home():
-    return {
-        "status": "running",
-        "message": "AI Voice Detector API is live"
-    }
 
-# Request body format
 class AudioRequest(BaseModel):
-    language: str
-    audio_format: str
     audio_base64: str
 
-# Feature extraction
+
 def extract_features(file_bytes):
     y, sr = librosa.load(io.BytesIO(file_bytes), sr=None)
 
@@ -45,26 +36,24 @@ def extract_features(file_bytes):
 
     return features.reshape(1, -1)
 
-# Prediction endpoint
-@app.post("/detect")
-def detect_voice(
-    request: AudioRequest,
-    x_api_key: str = Header(...)
-):
-    # Simple API key check
-    if x_api_key != "test12345":
-        raise HTTPException(status_code=401, detail="Invalid API Key")
 
+@app.get("/")
+def home():
+    return {
+        "status": "running",
+        "message": "AI Voice Detector API is live"
+    }
+
+
+@app.post("/predict")
+def predict(data: AudioRequest):
     try:
-        audio_bytes = base64.b64decode(request.audio_base64)
+        audio_bytes = base64.b64decode(data.audio_base64)
         features = extract_features(audio_bytes)
-
-        prediction = model.predict(features)[0]
-        confidence = float(np.max(model.predict_proba(features)))
+        prediction = model.predict(features)
 
         return {
-            "prediction": "Human" if prediction == 1 else "AI",
-            "confidence": round(confidence, 2)
+            "prediction": "AI" if prediction[0] == 1 else "Human"
         }
 
     except Exception as e:
